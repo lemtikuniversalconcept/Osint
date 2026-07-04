@@ -1,0 +1,9 @@
+psycopg2-binary>=2.9.9
+fastapi>=0.115.0
+starlette>=0.46.0,<1.0.0
+uvicorn>=0.30.0
+pydantic>=2.7.0
+apscheduler>=3.10.4
+
+# Heavy NLP packages are isolated in requirements-nlp.txt so the dashboard
+# remains fast and Python 3.14 wheel issues do not block the core app.

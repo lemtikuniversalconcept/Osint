@@ -1,0 +1,9 @@
+# Install this for the FastAPI brain/NLP service, preferably with Python 3.11
+# or 3.12 if Python 3.14 wheels are not available on your machine.
+spacy>=3.7.0
+transformers>=4.40.0
+torch>=2.3.0
+scikit-learn>=1.5.0
+
+# After installing, download the spaCy model:
+# python -m spacy download en_core_web_sm
