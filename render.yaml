@@ -6,3 +6,13 @@ services:
     buildCommand: python -m pip install -r requirements.txt
     startCommand: uvicorn brain_api:app --host 0.0.0.0 --port $PORT
     autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LEMTIK_STORAGE
+        value: supabase
+      - key: DATABASE_URL
+        sync: false
+      - key: LEMTIK_API_KEYS
+        sync: false
