@@ -5,6 +5,7 @@ from typing import Any
 import json
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from operations.alerts import dispatch_pending_alerts
@@ -162,6 +163,11 @@ def audit_request(request: Request, auth: AuthContext, org_id: str, action: str,
         user_agent=request.headers.get("user-agent", ""),
         metadata=json.dumps(metadata or {}),
     )
+
+
+@app.get("/")
+def read_root():
+    return RedirectResponse(url="/docs")
 
 
 @app.on_event("startup")
