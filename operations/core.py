@@ -123,28 +123,53 @@ THREAT_KEYWORDS = {
     ],
 }
 
+# Verified live (HTTP 200, curl -A <browser UA>) as of 2026-09-03. Every entry here must be a
+# feed that actually resolves - see DEAD_SOURCE_URLS below for the ones this list used to carry
+# and why each was dropped instead of "fixed" with a guessed replacement URL.
 DEFAULT_SOURCES = [
-    ("Lagos Traffic", "Social", "https://nitter.net/LagosTraffic/rss", "B", "Nitter RSS mirror for public X posts."),
-    ("LASEMA", "Official", "https://nitter.net/LASG_LASEMA/rss", "B", "Nitter RSS mirror for public X posts."),
-    ("Nigeria Police Force", "Official", "https://www.npf.gov.ng/", "A", ""),
     ("Lagos State Government", "Official", "https://lagosstate.gov.ng/", "A", ""),
     ("Vanguard Nigeria", "News", "https://www.vanguardngr.com/feed/", "A", ""),
     ("The Punch", "News", "https://punchng.com/feed/", "A", ""),
     ("Channels TV", "News", "https://www.channelstv.com/feed/", "A", ""),
     ("Premium Times", "News", "https://www.premiumtimesng.com/feed", "A", ""),
-    ("The Nation", "News", "https://thenationonlineng.net/feed/", "A", ""),
     ("Daily Trust", "News", "https://dailytrust.com/feed", "A", ""),
-    ("Guardian Nigeria", "News", "https://guardian.ng/feed/", "A", ""),
     ("Thisday Live", "News", "https://www.thisdaylive.com/index.php/feed/", "A", ""),
     ("BusinessDay Nigeria", "News", "https://businessday.ng/feed/", "A", ""),
     ("Leadership News", "News", "https://leadership.ng/feed/", "A", ""),
-    ("EFCC Nigeria", "Official", "https://efccnigeria.org/efcc/feed", "A", ""),
-    ("CBN Nigeria", "Official", "https://www.cbn.gov.ng/rss/", "A", ""),
     ("SaharaReporters", "News", "https://saharareporters.com/rss.xml", "B", ""),
     ("Peoples Gazette", "News", "https://gazettengr.com/feed/", "B", ""),
-    ("HumAngle", "News", "https://humanglemedia.com/feed/", "B", ""),
-    ("NigeriaPolice@X", "Social", "https://nitter.net/PoliceNG_Force/rss", "B", "Nitter RSS mirror for public X posts."),
-    ("ChannelsTV@X", "Social", "https://nitter.net/channelstv/rss", "B", "Nitter RSS mirror for public X posts."),
+    ("Nigerian Tribune", "News", "https://tribuneonlineng.com/feed/", "A", ""),
+    ("Daily Post Nigeria", "News", "https://dailypost.ng/feed/", "B", ""),
+    ("Nairametrics", "News", "https://nairametrics.com/feed/", "A", "Business/financial coverage - fills the gap left by CBN's dead RSS."),
+    ("ICIR Nigeria", "News", "https://www.icirnigeria.org/feed/", "A", "Investigative/financial-crime reporting - fills the gap left by EFCC's dead RSS."),
+]
+
+# Sources that were in DEFAULT_SOURCES before and are deliberately NOT being replaced with a
+# guessed URL, so the reason each was dropped is on record instead of silently disappearing:
+#   - Lagos Traffic, LASEMA, NigeriaPolice@X, ChannelsTV@X: routed through nitter.net, which shut
+#     down its public instances in 2024. No free replacement exists for X/Twitter without a paid
+#     API. Nigeria Police Force (npf.gov.ng) was never actually an RSS URL either - it was the
+#     site's homepage, which is why it always failed.
+#   - EFCC Nigeria, CBN Nigeria: their old feed URLs 404 and no working RSS endpoint could be
+#     found on either site (both are Joomla-style CMS with no documented feed route). Coverage of
+#     EFCC/CBN activity still comes through the general news sources above, which report on both
+#     agencies regularly; Nairametrics/ICIR were added specifically to strengthen that beat.
+#   - Guardian Nigeria, The Nation, HumAngle: these ARE live, working feeds - they 403/429
+#     specifically on requests from cloud-hosting IP ranges (Render's included), which is a
+#     hosting-egress-reputation problem, not a dead source. Worth re-adding if this service ever
+#     moves off shared cloud IPs or gets a proxy; not worth carrying as permanently-red entries
+#     in a health dashboard until then.
+DEAD_SOURCE_URLS = [
+    "https://nitter.net/LagosTraffic/rss",
+    "https://nitter.net/LASG_LASEMA/rss",
+    "https://nitter.net/PoliceNG_Force/rss",
+    "https://nitter.net/channelstv/rss",
+    "https://www.npf.gov.ng/",
+    "https://efccnigeria.org/efcc/feed",
+    "https://www.cbn.gov.ng/rss/",
+    "https://guardian.ng/feed/",
+    "https://thenationonlineng.net/feed/",
+    "https://humanglemedia.com/feed/",
 ]
 
 JUNK_PATTERNS = [
@@ -484,6 +509,16 @@ def seed_default_data() -> None:
         cursor.execute(
             normalize_query(insert_ignore_sql("organisations", ["id", "name", "created_at"], "(id)")),
             (DEFAULT_ORG_ID, "Lemtik Security", now_iso()),
+        )
+        # seed_default_data only ever INSERTs (ignoring conflicts), so rows for sources that were
+        # in an older DEFAULT_SOURCES but have since been removed - dead nitter.net mirrors, wrong
+        # gov.ng URLs, feeds that 404 - stick around forever otherwise, showing up as permanently
+        # "Failed" in /brain/diagnostics. This runs on every startup; it's a no-op once the rows
+        # are gone, so it's safe to leave in place.
+        placeholders = ", ".join(["?"] * len(DEAD_SOURCE_URLS))
+        cursor.execute(
+            normalize_query(f"delete from sources where org_id = ? and url in ({placeholders})"),
+            (DEFAULT_ORG_ID, *DEAD_SOURCE_URLS),
         )
         cursor.executemany(
             normalize_query(
