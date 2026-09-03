@@ -18,6 +18,7 @@ from operations.core import (
     quality_score,
     summarize,
 )
+from operations.groq_classifier import MODEL as GROQ_MODEL, classify_with_groq, groq_configured
 
 
 ORG_TERMS = [
@@ -71,8 +72,12 @@ def nlp_status() -> dict[str, Any]:
         "spacy_loaded": _spacy_model() is not None,
         "transformers_enabled": os.getenv("LEMTIK_ENABLE_TRANSFORMERS", "0").strip().lower() in {"1", "true", "yes"},
         "transformers_loaded": _sentiment_pipeline() is not None,
+        "groq_configured": groq_configured(),
         "active_entity_backend": "spacy:en_core_web_sm" if _spacy_model() is not None else "rule-based-fallback",
         "active_sentiment_backend": "transformers" if _sentiment_pipeline() is not None else "heuristic",
+        # Only used for single-call paths (/classify, /brain/query) - never the bulk RSS
+        # collection pipeline. See groq_classifier.py for why.
+        "active_single_query_classifier": f"groq:{GROQ_MODEL}" if groq_configured() else "rule-based-fallback",
     }
 
 
@@ -133,6 +138,31 @@ def threat_score(text: str, severity: int, confidence: int, quality: int, hit_co
     return round(max(0.0, min(score, 1.0)), 3)
 
 
+def _merge_groq_classification(base: dict[str, Any], groq_result: dict[str, Any] | None, cleaned: str) -> dict[str, Any]:
+    if not groq_result:
+        return base
+    category = groq_result.get("threat_category")
+    if isinstance(category, str) and category in THREAT_KEYWORDS:
+        base["threat_category"] = category
+    severity = groq_result.get("severity")
+    if isinstance(severity, int) and 1 <= severity <= 5:
+        base["severity"] = severity
+    confidence = groq_result.get("confidence")
+    if isinstance(confidence, int) and 0 <= confidence <= 100:
+        base["confidence"] = confidence
+    summary = groq_result.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        base["summary"] = summary.strip()[:400]
+    entities = base.get("entities") or {"locations": [], "organisations": [], "people": []}
+    for key in ("locations", "organisations", "people"):
+        groq_values = groq_result.get(key)
+        if isinstance(groq_values, list):
+            entities[key] = _unique(list(entities.get(key, [])) + [str(v) for v in groq_values if v])
+    base["entities"] = entities
+    base["classified_by"] = "groq"
+    return base
+
+
 def classify_text(
     text: str,
     *,
@@ -151,7 +181,7 @@ def classify_text(
     confidence = estimate_confidence(credibility, verification, item_quality, len(category_hits) + len(custom_hits))
     entities = extract_entities(cleaned)
     all_hits = _unique(category_hits + custom_hits)
-    return {
+    result = {
         "summary": summarize(cleaned),
         "threat_category": category,
         "severity": severity,
@@ -162,6 +192,14 @@ def classify_text(
         "entities": entities,
         "threat_score": threat_score(cleaned, severity, confidence, item_quality, len(all_hits)),
         "collectable": item_quality >= 55 and geo_relevance != "None" and bool(all_hits),
+        "classified_by": "rule-based",
+    }
+    # Deterministic result is already complete and valid at this point - Groq is a refinement
+    # layered on top, not a dependency. If it's unavailable or fails, `result` (built above) is
+    # returned exactly as-is, same as before this existed.
+    result = _merge_groq_classification(result, classify_with_groq(cleaned), cleaned)
+    return {
+        **result,
         "model": nlp_status(),
     }
 
