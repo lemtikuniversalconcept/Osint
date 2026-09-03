@@ -75,6 +75,7 @@ THREAT_KEYWORDS = {
         "robbers",
         "armed men",
         "gunmen",
+        "unknown gunmen",
         "shooting",
         "shot",
         "killed",
@@ -90,15 +91,40 @@ THREAT_KEYWORDS = {
         "intruder",
         "area boys",
         "agberos",
+        "omo onile",
+        "hoodlums",
+        "miscreants",
         "cultists",
         "riot",
         "protest",
         "unrest",
         "clash",
+        "communal clash",
+        "reprisal attack",
+        "invasion",
         "violence",
         "looting",
         "explosion",
         "blast",
+        # Mainstream current Nigerian security vocabulary - these dominate real Nigerian crime
+        # reporting today but were entirely absent, so genuinely relevant coverage (bandit
+        # attacks, insurgency, herder-farmer conflict) was being scored as "None"/no category
+        # match by detect_category() and geo_relevance_score() even when clearly on-topic.
+        "bandits",
+        "banditry",
+        "insurgents",
+        "insurgency",
+        "terrorists",
+        "terrorism",
+        "boko haram",
+        "iswap",
+        "ipob",
+        "esn",
+        "herdsmen",
+        "herders",
+        "fulani herdsmen",
+        "farmers-herders",
+        "vigilante",
     ],
     "Cyber": [
         "fraud",
@@ -113,6 +139,10 @@ THREAT_KEYWORDS = {
         "data breach",
         "leaked",
         "exposed",
+        "yahoo boys",
+        "yahoo yahoo",
+        "wuru wuru",
+        "419",
     ],
     "Political": [
         "strike",
@@ -120,6 +150,8 @@ THREAT_KEYWORDS = {
         "election violence",
         "thugs",
         "political thuggery",
+        "sit-at-home",
+        "sit at home",
     ],
     "Macro": [
         "fuel scarcity",
@@ -131,6 +163,8 @@ THREAT_KEYWORDS = {
         "evacuation",
         "cholera",
         "lassa fever",
+        "wahala",
+        "palava",
     ],
 }
 
@@ -854,7 +888,13 @@ def detect_category(text: str) -> tuple[str, list[str]]:
 
 def estimate_severity(text: str, credibility: str = "B") -> int:
     score = 1
-    if keyword_matches(text, ["kidnap", "abducted", "ransom", "shooting", "gunmen", "explosion", "riot"]):
+    if keyword_matches(
+        text,
+        [
+            "kidnap", "abducted", "ransom", "shooting", "gunmen", "explosion", "riot",
+            "bandits", "insurgents", "terrorists", "boko haram", "iswap", "unknown gunmen",
+        ],
+    ):
         score = 3
     if keyword_matches(text, ["ongoing", "active", "currently", "avoid", "blocked", "evacuate"]):
         score += 1
