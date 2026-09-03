@@ -5,7 +5,7 @@ import os
 import time
 from typing import Any
 
-from operations.core import row_to_dict, rows
+from operations.core import pool_org_id, row_to_dict, rows
 
 _cache: dict[tuple[str, str, int], tuple[float, dict[str, Any]]] = {}
 CACHE_TTL_SECONDS = int(os.getenv("LEMTIK_DASHBOARD_CACHE_SECONDS", "30"))
@@ -25,6 +25,7 @@ def risk_rating(max_severity: int | None, high_count: int, recent_count: int) ->
 
 
 def dashboard_summary(org_id: str, days: int = 7) -> dict[str, Any]:
+    org_id = pool_org_id(org_id)
     since = since_iso(days)
     totals = row_to_dict(
         rows(
@@ -50,6 +51,7 @@ def dashboard_summary(org_id: str, days: int = 7) -> dict[str, Any]:
 
 
 def category_breakdown(org_id: str, days: int = 7) -> list[dict[str, Any]]:
+    org_id = pool_org_id(org_id)
     return [
         row_to_dict(row)
         for row in rows(
@@ -68,6 +70,7 @@ def category_breakdown(org_id: str, days: int = 7) -> list[dict[str, Any]]:
 
 
 def latest_incidents(org_id: str, days: int = 7, limit: int = 20) -> list[dict[str, Any]]:
+    org_id = pool_org_id(org_id)
     return [
         row_to_dict(row)
         for row in rows(
@@ -148,6 +151,7 @@ def client_locations(org_id: str) -> list[dict[str, Any]]:
 
 
 def heatmap(org_id: str, days: int = 30) -> list[dict[str, Any]]:
+    org_id = pool_org_id(org_id)
     return [
         row_to_dict(row)
         for row in rows(

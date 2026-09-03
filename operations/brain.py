@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from operations.analytics import client_dashboard, latest_brief, risk_rating, since_iso
-from operations.core import row_to_dict, rows
+from operations.core import pool_org_id, row_to_dict, rows
 from operations.intel import intelligence_packet
 from operations.nlp import classify_text, extract_entities
 from operations.task_queue import list_brain_tasks
@@ -15,6 +15,7 @@ def _question_tokens(value: str) -> list[str]:
 
 
 def source_health(org_id: str) -> dict[str, Any]:
+    org_id = pool_org_id(org_id)
     sources = [
         row_to_dict(row)
         for row in rows(
@@ -45,6 +46,7 @@ def source_health(org_id: str) -> dict[str, Any]:
 
 
 def source_rollup(org_id: str, days: int = 7) -> list[dict[str, Any]]:
+    org_id = pool_org_id(org_id)
     since = since_iso(days)
     return [
         row_to_dict(row)
@@ -64,6 +66,7 @@ def source_rollup(org_id: str, days: int = 7) -> list[dict[str, Any]]:
 
 
 def source_priority_plan(org_id: str, days: int = 7, limit: int = 20) -> list[dict[str, Any]]:
+    org_id = pool_org_id(org_id)
     since = since_iso(days)
     return [
         row_to_dict(row)
@@ -107,6 +110,7 @@ def source_priority_plan(org_id: str, days: int = 7, limit: int = 20) -> list[di
 
 
 def collection_health(org_id: str) -> dict[str, Any]:
+    org_id = pool_org_id(org_id)
     runs = [
         row_to_dict(row)
         for row in rows(

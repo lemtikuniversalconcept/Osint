@@ -35,6 +35,16 @@ def usable_database_url(value: str) -> str:
 
 
 DEFAULT_ORG_ID = os.getenv("LEMTIK_DEFAULT_ORG_ID", "default").strip() or "default"
+
+
+def pool_org_id(_caller_org_id: str) -> str:
+    """Scraping/collection is one shared, centrally-run pool (see DEFAULT_SOURCES) - customers
+    never configure or own sources themselves. Every org's query reads the same underlying
+    sources/incidents/collection_runs data, filtered by relevance (location, keywords) rather
+    than by DB ownership. This resolves any caller's org_id to the pool's actual owner for those
+    three tables specifically; callers keep using their own org_id everywhere else (audit logs,
+    briefs, clients, alerts, response labelling) so per-customer data stays isolated."""
+    return DEFAULT_ORG_ID
 STORAGE_MODE = os.getenv("LEMTIK_STORAGE", "sqlite").strip().lower()
 SUPABASE_DB_URL = next(
     (
@@ -1204,7 +1214,7 @@ def weekly_report_markdown(days: int = 7, org_id: str = DEFAULT_ORG_ID) -> str:
         and geo_relevance in ('Lagos', 'Nigeria', 'Client')
         order by severity desc, confidence desc, collected_at desc
         """,
-        (since, org_id),
+        (since, pool_org_id(org_id)),
     )
     high = [i for i in incidents if i["severity"] >= 4]
     verified = [i for i in incidents if i["verified"] == "Yes"]

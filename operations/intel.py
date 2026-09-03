@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from operations.analytics import risk_rating, since_iso
-from operations.core import clean_text, row_to_dict, rows
+from operations.core import clean_text, pool_org_id, row_to_dict, rows
 from operations.nlp import classify_text, extract_entities
 
 
@@ -55,6 +55,7 @@ def _score_incident(summary: str, location_terms: list[str], text_terms: list[st
 
 
 def _recent_incidents(org_id: str, days: int, limit: int = 300) -> list[dict[str, Any]]:
+    org_id = pool_org_id(org_id)
     return [
         row_to_dict(row)
         for row in rows(
