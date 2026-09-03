@@ -20,7 +20,8 @@ def source_health(org_id: str) -> dict[str, Any]:
         row_to_dict(row)
         for row in rows(
             """
-            select id, name, source_type, url, credibility, last_checked_at, last_status, last_error
+            select id, name, source_type, url, credibility, last_checked_at, last_status,
+                   last_error, consecutive_failures, active
             from sources
             where org_id = ?
             order by last_status, credibility, name
@@ -28,9 +29,15 @@ def source_health(org_id: str) -> dict[str, Any]:
             (org_id,),
         )
     ]
-    healthy = sum(1 for source in sources if str(source.get("last_status") or "").upper() == "OK")
-    failed = sum(1 for source in sources if str(source.get("last_status") or "").upper() == "FAILED")
-    stale = sum(1 for source in sources if not source.get("last_checked_at"))
+    # A source that's crossed CONSECUTIVE_FAILURE_DISABLE_THRESHOLD and gotten auto-disabled is
+    # acknowledged and parked, not an active problem - it stops being retried (see
+    # collect_all_sources), so it shouldn't keep dragging the score down every single time
+    # someone checks diagnostics. It's still listed below for visibility; it just isn't scored.
+    active_sources = [source for source in sources if source.get("active")]
+    disabled_sources = [source for source in sources if not source.get("active")]
+    healthy = sum(1 for source in active_sources if str(source.get("last_status") or "").upper() == "OK")
+    failed = sum(1 for source in active_sources if str(source.get("last_status") or "").upper() == "FAILED")
+    stale = sum(1 for source in active_sources if not source.get("last_checked_at"))
     score = 100
     score -= min(stale * 10, 40)
     score -= min(failed * 15, 45)
@@ -40,8 +47,10 @@ def source_health(org_id: str) -> dict[str, Any]:
         "healthy": healthy,
         "failed": failed,
         "stale": stale,
+        "disabled": len(disabled_sources),
         "score": score,
-        "sources": sources[:30],
+        "sources": active_sources[:30],
+        "disabled_sources": disabled_sources[:30],
     }
 
 
@@ -101,10 +110,11 @@ def source_priority_plan(org_id: str, days: int = 7, limit: int = 20) -> list[di
               group by source
             ) i on i.source = s.name
             where s.org_id = ?
+            and s.active = ?
             order by priority_score desc, coalesce(i.incidents, 0) desc, s.credibility, s.name
             limit ?
             """,
-            (org_id, since, org_id, limit),
+            (org_id, since, org_id, True, limit),
         )
     ]
 

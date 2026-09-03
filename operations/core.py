@@ -422,7 +422,9 @@ def _init_db_uncached() -> None:
                 created_at text not null,
                 last_checked_at text not null default '',
                 last_status text not null default 'Never checked',
-                last_error text not null default ''
+                last_error text not null default '',
+                consecutive_failures integer not null default 0,
+                active integer not null default 1
             );
 
             create table if not exists incidents (
@@ -560,6 +562,8 @@ def seed_default_data() -> None:
         # additive schema changes to the live table reach production. IF NOT EXISTS makes it a
         # no-op after the first successful run.
         cursor.execute("alter table incidents add column if not exists raw_content_key text not null default ''")
+        cursor.execute("alter table sources add column if not exists consecutive_failures integer not null default 0")
+        cursor.execute("alter table sources add column if not exists active boolean not null default true")
         # seed_default_data only ever INSERTs (ignoring conflicts), so rows for sources that were
         # in an older DEFAULT_SOURCES but have since been removed - dead nitter.net mirrors, wrong
         # gov.ng URLs, feeds that 404 - stick around forever otherwise, showing up as permanently
@@ -1008,14 +1012,35 @@ def enqueue_alert_event(org_id: str, incident_id: int, severity: int, summary: s
     )
 
 
+# 4 scheduled collection runs/day (see scheduler.py's COLLECTION_HOURS) - 8 consecutive failures
+# is 2 full days of the source failing on every single run, long enough that a transient
+# network blip or one rate-limited request (seen with Tribune/Leadership News - fine on retest)
+# can't trigger it, but short enough that a genuinely dead feed stops wasting collection cycles
+# and dragging the health score down within a few days instead of forever.
+CONSECUTIVE_FAILURE_DISABLE_THRESHOLD = 8
+
+
 def update_source_status(source_id: int, status: str, error: str = "") -> None:
+    if status.upper() == "OK":
+        execute(
+            """
+            update sources
+            set last_checked_at = ?, last_status = ?, last_error = ?, consecutive_failures = 0
+            where id = ?
+            """,
+            (now_iso(), status, error[:500], source_id),
+        )
+        return
+    existing = rows("select consecutive_failures from sources where id = ?", (source_id,))
+    failures = (int(existing[0]["consecutive_failures"] or 0) + 1) if existing else 1
+    disable = failures >= CONSECUTIVE_FAILURE_DISABLE_THRESHOLD
     execute(
         """
         update sources
-        set last_checked_at = ?, last_status = ?, last_error = ?
+        set last_checked_at = ?, last_status = ?, last_error = ?, consecutive_failures = ?, active = ?
         where id = ?
         """,
-        (now_iso(), status, error[:500], source_id),
+        (now_iso(), status, error[:500], failures, not disable, source_id),
     )
 
 
@@ -1221,7 +1246,7 @@ def collect_all_sources(extra_keywords: str = "", org_id: str = DEFAULT_ORG_ID) 
     total_checked = 0
     total_created = 0
     total_skipped = 0
-    for source in rows("select id from sources where org_id = ? order by credibility, name", (org_id,)):
+    for source in rows("select id from sources where org_id = ? and active = ? order by credibility, name", (org_id, True)):
         checked, created, skipped = collect_from_source(source["id"], extra_keywords, org_id)
         total_checked += checked
         total_created += created
