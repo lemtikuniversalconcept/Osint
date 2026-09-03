@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from operations.blob_storage import upload_text
 from operations.env import load_env_file
 
 
@@ -398,6 +399,7 @@ def _init_db_uncached() -> None:
                 source text not null,
                 source_url text not null,
                 raw_content text not null,
+                raw_content_key text not null default '',
                 summary text not null,
                 threat_category text not null,
                 severity integer not null check(severity between 1 and 5),
@@ -520,6 +522,10 @@ def seed_default_data() -> None:
             normalize_query(insert_ignore_sql("organisations", ["id", "name", "created_at"], "(id)")),
             (DEFAULT_ORG_ID, "Lemtik Security", now_iso()),
         )
+        # Postgres never runs the SQLite-only CREATE TABLE block below, so this is the one place
+        # additive schema changes to the live table reach production. IF NOT EXISTS makes it a
+        # no-op after the first successful run.
+        cursor.execute("alter table incidents add column if not exists raw_content_key text not null default ''")
         # seed_default_data only ever INSERTs (ignoring conflicts), so rows for sources that were
         # in an older DEFAULT_SOURCES but have since been removed - dead nitter.net mirrors, wrong
         # gov.ng URLs, feeds that 404 - stick around forever otherwise, showing up as permanently
@@ -877,30 +883,42 @@ def summarize(text: str, limit: int = 220) -> str:
     return text[: limit - 1].rsplit(" ", 1)[0] + "."
 
 
+RAW_CONTENT_STORED_CHARS = 2000
+
+
 def add_incident(data: dict[str, str]) -> bool:
     severity = int(data.get("severity") or 1)
     raw_content = data.get("raw_content", "").strip()
     source_url = data.get("source_url", "").strip()
     digest = data.get("content_hash") or content_hash(source_url, raw_content)
+    log_id = next_log_id()
+    org_id = data.get("org_id", DEFAULT_ORG_ID)
+    # Archive the FULL text to R2 before deciding what to store in Postgres - content_hash and
+    # quality_score above already ran against the full raw_content, so truncating what's stored
+    # here doesn't change classification, only storage footprint. If R2 isn't configured or the
+    # upload fails, r2_key stays None and the full text is kept in Postgres exactly as before -
+    # this must never be the reason an incident fails to save.
+    r2_key = upload_text(f"osint/raw/{org_id}/{log_id}.txt", raw_content) if raw_content else None
+    stored_raw_content = raw_content if r2_key is None else raw_content[:RAW_CONTENT_STORED_CHARS]
     try:
-        org_id = data.get("org_id", DEFAULT_ORG_ID)
         execute(
             """
             insert into incidents
-            (org_id, log_id, collected_at, source, source_url, raw_content, summary,
-             threat_category, severity, location_relevance, verified,
+            (org_id, log_id, collected_at, source, source_url, raw_content, raw_content_key,
+             summary, threat_category, severity, location_relevance, verified,
              verification_source, client_notified, notification_method, status,
              analyst, notes, content_hash, matched_keywords, confidence, quality_score,
              geo_relevance)
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 org_id,
-                next_log_id(),
+                log_id,
                 data.get("collected_at") or now_iso(),
                 data.get("source", "").strip(),
                 source_url,
-                raw_content,
+                stored_raw_content,
+                r2_key or "",
                 data.get("summary", "").strip(),
                 data.get("threat_category", "Physical"),
                 severity,
